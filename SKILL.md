@@ -24,6 +24,62 @@ Before running any command from this skill, resolve the installed skill director
 
 Either may be a real directory or a symlink to a local clone of the repo. If neither exists, locate the repo copy that contains this `SKILL.md`. Do not assume the user workspace also contains `scripts/terminal_capture.py`; many workspaces only contain scenario files and helper demo scripts.
 
+## Scenario Quick Reference
+
+Tunable fields, grouped by scope. Anything not listed here is in `references/scenario-patterns.md`.
+
+| Scope | Field | Default | When to adjust |
+|---|---|---|---|
+| top | `cwd` | scenario directory | Cross-directory resource references |
+| top | `shell` | `["bash", "--noprofile", "--norc", "-i"]` | Need a different shell |
+| top | `requires` | `[]` | Add VHS `Require` lines |
+| ttyd | `viewport.width` | 1400 | Wider terminal for long lines / panels |
+| ttyd | `viewport.height` | 560 | Taller terminal for paged output |
+| ttyd | `viewport.deviceScaleFactor` | 2 | PNG too blurry or too large |
+| ttyd | `fontSize` | 20 | Readability |
+| ttyd | `typingDelayMs` | 20 | Faster / slower typing animation |
+| ttyd | `cursorBlink` | true | Disable for cleaner stills |
+| ttyd | `theme` | xterm default | Custom color theme |
+| vhs | `width` | 1280 | Match ttyd viewport |
+| vhs | `height` | 760 | Match ttyd viewport |
+| vhs | `fontSize` | 22 | Readability |
+| vhs | `padding` | 24 | Outer canvas padding |
+| vhs | `windowBar` | `"Colorful"` | Window chrome style |
+| vhs | `borderRadius` | 10 | Rounded corners |
+| vhs | `theme` | `"Ubuntu"` | Different VHS theme |
+| vhs | `typingSpeed` | `"35ms"` | Faster / slower typing animation |
+| vhs | `framerate` | 30 | Smoother or smaller motion |
+| vhs | `playbackSpeed` | unset | Final playback speed multiplier |
+| vhs | `outputs` | `["mp4"]` | Need gif / webm or multiple formats |
+| vhs | `endHoldSeconds` | 2 | Motion final frame needs more reading time |
+| vhs | `endHoldMs` | unset | Same as `endHoldSeconds` in ms |
+| vhs | `screenshotSettleMs` | 120 | Delay after a `Screenshot` step |
+| vhs | `waitTimeout` | unset | Override default 10s wait timeout |
+| screenshots | `autocrop` | true | Set false to keep original margins |
+| screenshots | `padding` | 18 | Margin around autocrop bounds |
+| step `command` | `wrap_at_columns` | unset | Long command overruns terminal width |
+| step `command` | `prompt_columns` | 0 | `wrap_at_columns` enabled and PS1 is wide |
+| step `command` | `continuation_prompt_columns` | 0 | Wrapped continuation lines also have a prompt |
+| step `command` | `wrap_indent` | 2 | Continuation-line indent |
+| step `command` | `clear_before` | false | `Ctrl+L` before typing |
+| step `command` | `timeout_ms` | 10000 | Slow command (solver / network) |
+| step `command` | `result_delay_ms` | 900 | Only when no `wait_for_text` |
+| step `command` | `typed_shot` / `result_shot` | unset | Auto-capture at typed / result moments |
+| step | `pattern_by_engine` / `wait_for_text_by_engine` | unset | Different prompts per engine |
+
+## Engine Decision Tree
+
+```
+What do you want to produce?
+├── One or a few static PNGs                   → prefer ttyd
+│   ├── Multi-modifier special-key chords      → must use ttyd
+│   └── ttyd environment blocked               → fall back to VHS `Screenshot`
+├── GIF / MP4 / WebM motion                    → must use VHS
+│   ├── Also need static PNGs                  → engine: `all`
+│   └── Target a GitHub PR or issue            → outputs `["gif", "mp4"]` only (see Common Pitfalls)
+└── Recording an agent CLI (codex / claude)    → VHS + stable-wait pattern
+```
+
 ## Workflow
 
 1. Resolve `SKILL_ROOT`, then run `python "$SKILL_ROOT/scripts/terminal_capture.py" check`.
@@ -51,6 +107,51 @@ Either may be a real directory or a symlink to a local clone of the repo. If nei
 14. If the user asked for visual verification, or the asset is customer-facing, inspect the final stills directly. For video or GIF, first run `python "$SKILL_ROOT/scripts/terminal_capture.py" probe-media <media>` to get the duration and suggested timestamps, then extract representative frames with `python "$SKILL_ROOT/scripts/terminal_capture.py" extract-frames <media> --times <comma-separated-seconds>`.
 15. If the visual review fails, adjust the scenario and rerender. Do not stop at “the command succeeded” when the artifact itself is the deliverable.
 16. If a prompt or confirmation beat is too brief in motion output, add a short `sleep` step before the reply so the state is legible in GIF or video, then rerender.
+
+## Common Pitfalls
+
+Three failure modes recur across real downstream usage. They are also documented in `references/field-notes.md`; they appear here because new scenarios still hit them on the first attempt.
+
+### 1. `wait_for_text` is viewport-bounded on both engines
+
+VHS `Wait+Screen /pattern/` only matches text currently visible on screen. ttyd's current `waitForText` reads the `.xterm-rows` DOM, which also only contains visible rows. When command output exceeds one screen, the target line scrolls out of view and the wait will time out — even though the pattern clearly appeared.
+
+Fix: wait for the prompt to return, not for an intermediate line. Append `|| true` so non-zero exits still return to the prompt.
+
+```json
+{
+  "action": "command",
+  "text": "long_command_with_many_lines || true",
+  "wait_for_text": "demo \\$",
+  "timeout_ms": 30000
+}
+```
+
+For solver-like commands, also raise `timeout_ms`. Avoid waiting on rows that only appear deep inside a long table.
+
+### 2. Motion output ends too fast for viewers to read
+
+`vhs.endHoldSeconds` defaults to 2. For looping demo GIFs this is usually fine; for hero clips, tutorial videos, or PR review media, viewers cannot read the final state in time and the asset has to be re-rendered.
+
+Fix: raise `endHoldSeconds` to match the asset's purpose.
+
+```json
+{ "vhs": { "endHoldSeconds": 4 } }
+```
+
+Empirical values: tutorial / hero / PR review → 3–5s; pure loop GIF → 2s (default); summary-screen demo → 4–6s.
+
+### 3. GitHub `gh image` rejects WebM uploads
+
+GitHub's image upload endpoint rejects WebM with HTTP 422 `content_type is not included in the list`. Anything posted directly into a PR or issue body must be GIF / PNG / MP4.
+
+Fix: for PR delivery render only `["gif", "mp4"]` — GIF auto-loops in markdown, MP4 gives a native `<video>` control with pause and scrub.
+
+```json
+{ "vhs": { "outputs": ["gif", "mp4"] } }
+```
+
+WebM remains useful as a high-quality local archive; just do not paste it into a GitHub thread.
 
 ## Scenario Rules
 

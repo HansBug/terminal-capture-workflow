@@ -2,6 +2,8 @@
 
 Use this reference for real-world lessons learned while rendering terminal assets under nontrivial constraints.
 
+> The three most recurrent pitfalls (viewport-bounded waits, motion final-hold too short, WebM rejected by GitHub) are surfaced directly in `SKILL.md` under **Common Pitfalls** so first-time scenarios stop tripping on them. The full original notes — including the corner cases below — still live here.
+
 The examples below are intentionally sanitized. Hostnames, usernames, repository names, branch names, and project-specific identifiers have been generalized so the patterns stay reusable.
 
 ## When To Split One Flow Into Multiple Videos
