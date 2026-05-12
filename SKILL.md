@@ -40,6 +40,7 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | ttyd | `typingDelayMs` | 20 | Faster / slower typing animation |
 | ttyd | `cursorBlink` | true | Disable for cleaner stills |
 | ttyd | `theme` | xterm default | Custom color theme |
+| ttyd | `rendererType` | `"dom"` | Switch to `canvas` / `webgl` only if DOM rendering misbehaves |
 | vhs | `width` | 1280 | Match ttyd viewport |
 | vhs | `height` | 760 | Match ttyd viewport |
 | vhs | `fontSize` | 22 | Readability |
@@ -51,7 +52,7 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | vhs | `framerate` | 30 | Smoother or smaller motion |
 | vhs | `playbackSpeed` | unset | Final playback speed multiplier |
 | vhs | `outputs` | `["mp4"]` | Need gif / webm or multiple formats |
-| vhs | `endHoldSeconds` | 2 | Motion final frame needs more reading time |
+| vhs | `endHoldSeconds` | 2 (motion outputs only; PNG-only flows hold 0) | Motion final frame needs more reading time |
 | vhs | `endHoldMs` | unset | Same as `endHoldSeconds` in ms |
 | vhs | `screenshotSettleMs` | 120 | Delay after a `Screenshot` step |
 | vhs | `waitTimeout` | unset | Override default 10s wait timeout |
@@ -77,7 +78,7 @@ What do you want to produce?
 ├── GIF / MP4 / WebM motion                    → must use VHS
 │   ├── Also need static PNGs                  → engine: `all`
 │   └── Target a GitHub PR or issue            → outputs `["gif", "mp4"]` only (see Common Pitfalls)
-└── Recording an agent CLI (codex / claude)    → VHS + stable-wait pattern
+└── Recording an agent CLI (codex / claude)    → VHS, with a wider viewport and longer endHoldSeconds (see paragraph below)
 ```
 
 When the target is an agent CLI such as `codex` or `claude`, the UI includes tool-call panels and streaming spinners. In that case raise both `vhs.width` (or `ttyd.viewport.width`) to at least `1400` so panels do not break, and `vhs.endHoldSeconds` to `4` or more so viewers can read the final answer. A dedicated `references/recording-agent-cli.md` plus starter scenarios are tracked separately.
@@ -143,9 +144,9 @@ Fix: raise `endHoldSeconds` to match the asset's purpose.
 
 Empirical values: tutorial / hero / PR review → 3–5s; pure loop GIF → 2s (default); summary-screen demo → 4–6s.
 
-### 3. GitHub `gh image` rejects WebM uploads
+### 3. GitHub's media upload endpoint rejects WebM
 
-GitHub's image upload endpoint rejects WebM with HTTP 422 `content_type is not included in the list`. Anything posted directly into a PR or issue body must be GIF / PNG / MP4.
+GitHub's media upload endpoint (the path that backs PR / issue drag-and-drop attachments, as well as the `gh-image` CLI extension) rejects WebM with HTTP 422 `content_type is not included in the list`. Anything posted directly into a PR or issue body must be GIF / PNG / MP4.
 
 Fix: for PR delivery render only `["gif", "mp4"]` — GIF auto-loops in markdown, MP4 gives a native `<video>` control with pause and scrub.
 
