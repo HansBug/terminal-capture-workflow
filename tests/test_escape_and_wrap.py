@@ -1,10 +1,14 @@
 """Regression and bug-fix tests for VHS escape and shell-command wrapping.
 
-Tracks issue #3. Empirical VHS probing (see PR description) showed that
-the issue body's first proposed fix — escaping `\\` to `\\\\` inside the
-VHS Type string — is wrong: VHS does NOT unescape `\\\\`, it types two
-literal backslashes, which collides with `field-notes.md`'s explicit
-"don't double backslashes" rule and breaks real renders.
+Tracks issue #3. Empirical VHS probing showed that the issue body's
+first proposed fix — escaping `\\` to `\\\\` inside the VHS Type
+string — is wrong: VHS does NOT unescape `\\\\`, it types two literal
+backslashes, which collides with `field-notes.md`'s explicit "don't
+double backslashes" rule and breaks real renders. The reproducible
+probe procedure and tape commands that produced this conclusion are
+recorded under "Empirical probe: VHS Type string semantics" in
+``references/field-notes.md``; re-run it before any future change to
+``escape_vhs_text``.
 
 The real bug is purely on the wrap side: a forced break landing on a
 literal `\\` produced ``chunk\\ \\`` (chunk-trailing backslash plus the
@@ -82,6 +86,49 @@ def test_wrap_prefers_unquoted_whitespace_breakpoints():
     wrapped = wrap_shell_command_text(text, wrap_at_columns=20)
     assert "'a b c'" in wrapped, (
         f"Quoted region was split across continuation lines: {wrapped!r}"
+    )
+
+
+def test_wrap_strips_multiple_consecutive_chunk_trailing_backslashes():
+    """The chunk-trailing-backslash rollback uses a `while` loop, so it
+    must handle chunks that end in two or more consecutive `\\` correctly
+    — every one of them needs to be moved to the next chunk, not just the
+    last one."""
+    text = "a" * 15 + "\\" * 3 + "b" * 5
+    wrapped = wrap_shell_command_text(text, wrap_at_columns=20)
+    for line in wrapped.split("\n"):
+        if line.endswith(" \\"):
+            chunk = line[:-2]
+            assert not chunk.endswith("\\"), (
+                f"Chunk still ends in backslash after rollback: {chunk!r}"
+            )
+
+    # Reconstruct: all 3 literal backslashes must survive in the output.
+    recovered = ""
+    for line in wrapped.split("\n"):
+        if line.endswith(" \\"):
+            recovered += line[:-2]
+        else:
+            recovered += line.lstrip()
+    assert recovered == text, (
+        f"Multi-backslash rollback lost characters. "
+        f"Expected {text!r}, got {recovered!r}"
+    )
+
+
+def test_wrap_falls_back_to_unwrapped_for_pathological_backslash_input():
+    """When the chunk reduces to empty after rolling back trailing
+    backslashes — i.e., the prefix the wrapper would otherwise put on
+    the line is dominated by literal `\\` characters with no break-
+    friendly content — wrap is silently disabled and the input is
+    returned unchanged. This is by design (see wrap_shell_command_text
+    docstring); pin it down so future readers don't mistake the absent
+    wrap for a bug."""
+    pathological = "\\" * 18 + "a" * 30
+    result = wrap_shell_command_text(pathological, wrap_at_columns=20)
+    assert result == pathological, (
+        f"Pathological backslash-dominated input should round-trip "
+        f"unchanged through wrap. Got {result!r}"
     )
 
 

@@ -44,14 +44,14 @@ For behavior changes, also do real end-to-end checks:
 ## Unit Tests
 
 - Tests live in `tests/`. `tests/conftest.py` adds `scripts/` to `sys.path` so `from terminal_capture import ...` works without packaging the renderer. No `pyproject.toml` / `setup.py` — the repo stays single-script-friendly.
-- Runner is `pytest` (any 7.x+; verified on 9.0.3). Run from the repo root: `python3 -m pytest tests/`. CI-friendly flags like `-q` or `-v` are fine.
+- Runner is `pytest`. The test files only use plain `def test_*` + `assert`, so any reasonably recent pytest works; the dev environment is pinned at the top of `tests/conftest.py`. Run from the repo root: `python3 -m pytest tests/`. CI-friendly flags like `-q` or `-v` are fine.
 - New test files go in `tests/test_*.py`. Share helpers and path injection via `conftest.py`.
 - Test-driven workflow for any change to `scripts/terminal_capture.py` or `scripts/render_ttyd_scenario.js`:
   1. Write the failing test first. Run pytest. Watch it fail **for the right reason** (feature missing, not a typo).
   2. Write the minimal fix. Run pytest. Watch it pass.
   3. For renderer behavior changes, also run **at least one VHS end-to-end render** of a scenario that exercises the changed code path. Pytest alone cannot prove the generated tape parses on the real `vhs` binary.
-- **End-to-end is authoritative.** If pytest is green but `vhs` rejects the tape, the test invariant is wrong — revise the assumption and rewrite the test, never paper over the failure. Issue #3 / PR #15 is the canonical example: pytest passed an "escape `\` to `\\`" fix that the real VHS binary would reject; only the e2e render exposed it.
-- Cross-renderer symmetry: when patching `wrap_shell_command_text` or other shared logic in `scripts/terminal_capture.py`, mirror the change in `scripts/render_ttyd_scenario.js`. We do not currently run JS unit tests, so manual symmetry check plus `node --check scripts/render_ttyd_scenario.js` is the bar; if a JS-only bug emerges, add a JS test harness rather than dropping the symmetry.
+- **When pytest and e2e disagree, e2e is the ground truth about the rendering toolchain (VHS, ttyd).** Re-examine the test invariant first — verify with a second minimal probe (see `references/field-notes.md` for the canonical VHS Type-string probe) before deciding which half of the contradiction was wrong. Do not paper over an e2e failure by widening the test. Note that e2e itself can be wrong too (a VHS regression, a ttyd version change, a platform difference); the discipline is "re-test the assumption", not "e2e is always right". Issue #3 / PR #15 is the canonical worked example: pytest greenlit an "escape `\` to `\\`" fix that the real VHS binary rejected, and the resolution was to revise the test invariant and withdraw the fix.
+- Cross-renderer symmetry: when patching `wrap_shell_command_text` or other shared logic in `scripts/terminal_capture.py`, mirror the change in `scripts/render_ttyd_scenario.js`. We do not currently run JS unit tests, so manual symmetry check plus `node --check scripts/render_ttyd_scenario.js` is the bar. If a JS-only bug emerges, add a JS test harness rather than dropping the symmetry — default to Node's stdlib `node:test` + `node --test` to avoid pulling in a bundler/runner dependency; only escalate to `vitest` / `jest` if a real DOM or Playwright integration is needed.
 
 ## What Not To Do
 
