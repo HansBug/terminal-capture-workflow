@@ -167,6 +167,12 @@ def wrap_shell_command_text(
         if not chunk:
             return normalized
 
+        while chunk.endswith("\\"):
+            chunk = chunk[:-1]
+            break_index -= 1
+        if not chunk:
+            return normalized
+
         lines.append(f"{chunk} \\")
         start = break_index
         while start < len(normalized) and normalized[start].isspace():
