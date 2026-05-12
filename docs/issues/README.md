@@ -1,6 +1,8 @@
-# Issue 草稿索引（待审批）
+# Issue 草稿索引
 
-本目录是 `terminal-capture-workflow` 一次系统性打磨的 issue 草稿集。每份 `NN-*.md` 是一个独立 issue 的 body，审批后直接：
+本目录是 `terminal-capture-workflow` 一次系统性打磨的 issue 草稿集，对应 GitHub 上的 [Tracking issue #13](https://github.com/HansBug/terminal-capture-workflow/issues/13)。子 issue 编号 #1 ~ #12 与本目录的 `NN-*.md` 严格对齐。
+
+每份 `NN-*.md` 是一个独立 issue 的 body 草稿；落库后保留作为本地参考，也方便未来 PR 引用证据/方案。如果要再开一个独立 issue：
 
 ```bash
 gh issue create --title "<标题>" --body-file docs/issues/NN-*.md --label <label>
@@ -27,20 +29,20 @@ gh issue create --title "<标题>" --body-file docs/issues/NN-*.md --label <labe
 
 ## 优先级与建议落地顺序
 
-| # | 标题 | Track | 优先级 | 依赖 |
+| Issue | 标题 | Track | 优先级 | 依赖 |
 |---|---|---|---|---|
-| 1 | 在 SKILL.md 顶部加 Scenario 参数速查表 + 引擎决策树 | A | P0 | 无 |
-| 2 | 把三大常见踩坑（长输出 wait race / motion 收尾短 / WebM 不能 PR）前置到 SKILL.md | A | P0 | 无 |
-| 3 | 修复 `escape_vhs_text` 漏转义 `\` + `wrap_shell_command_text` 末位续行多重转义 | F | P0 | 无 |
-| 4 | ttyd 的 `wait_for_text` 从 DOM viewport 改成 xterm.js buffer | F+C | P0 | 无 |
-| 5 | 新增 `init` 子命令 + `references/project-layout.md` | B | P1 | 无 |
-| 6 | 新增 `wait_for_prompt` 语糖 + scenario lint | C | P1 | 无 |
-| 7 | 新增 `wait_until_stable` step 字段 | C+H | P1 | #4 推荐 |
-| 8 | 新增 `pre_warm` scenario 字段 + `references/fixtures-and-mocks.md` | D | P2 | 无 |
-| 9 | 新增 `validate-scenario` 子命令 + final-frame 卡帧检测 | E | P2 | 无 |
-| 10 | 新增 `references/recording-agent-cli.md` + Codex/Claude TUI starter scenarios | H | P1 | #7 |
-| 11 | `"github-pr"` 输出预设 + 文档说明 WebM 不能 PR | G | P2 | 无 |
-| 12 | `render` 子命令支持多 scenario + `--parallel` | G | P2 | 无 |
+| [#1](https://github.com/HansBug/terminal-capture-workflow/issues/1) | 在 SKILL.md 顶部加 Scenario 参数速查表 + 引擎决策树 | A | P0 | 无 |
+| [#2](https://github.com/HansBug/terminal-capture-workflow/issues/2) | 把三大常见踩坑（长输出 wait race / motion 收尾短 / WebM 不能 PR）前置到 SKILL.md | A | P0 | 无 |
+| [#3](https://github.com/HansBug/terminal-capture-workflow/issues/3) | 修复 `escape_vhs_text` 漏转义 `\` + `wrap_shell_command_text` 末位续行多重转义 | F | P0 | 无 |
+| [#4](https://github.com/HansBug/terminal-capture-workflow/issues/4) | ttyd 的 `wait_for_text` 从 DOM viewport 改成 xterm.js buffer | F+C | P0 | 无 |
+| [#5](https://github.com/HansBug/terminal-capture-workflow/issues/5) | 新增 `init` 子命令 + `references/project-layout.md` | B | P1 | 无 |
+| [#6](https://github.com/HansBug/terminal-capture-workflow/issues/6) | 新增 `wait_for_prompt` 语糖 + scenario lint | C | P1 | 无 |
+| [#7](https://github.com/HansBug/terminal-capture-workflow/issues/7) | 新增 `wait_until_stable` step 字段 | C+H | P1 | #4 推荐 |
+| [#8](https://github.com/HansBug/terminal-capture-workflow/issues/8) | 新增 `pre_warm` scenario 字段 + `references/fixtures-and-mocks.md` | D | P2 | 无 |
+| [#9](https://github.com/HansBug/terminal-capture-workflow/issues/9) | 新增 `validate-scenario` 子命令 + final-frame 卡帧检测 | E | P2 | 无 |
+| [#10](https://github.com/HansBug/terminal-capture-workflow/issues/10) | 新增 `references/recording-agent-cli.md` + Codex/Claude TUI starter scenarios | H | P1 | #7 |
+| [#11](https://github.com/HansBug/terminal-capture-workflow/issues/11) | `"github-pr"` 输出预设 + 文档说明 WebM 不能 PR | G | P2 | 无 |
+| [#12](https://github.com/HansBug/terminal-capture-workflow/issues/12) | `render` 子命令支持多 scenario + `--parallel` | G | P2 | 无 |
 
 ## 向后兼容约束（所有 issue 共用）
 
