@@ -80,6 +80,8 @@ What do you want to produce?
 └── Recording an agent CLI (codex / claude)    → VHS + stable-wait pattern
 ```
 
+When the target is an agent CLI such as `codex` or `claude`, the UI includes tool-call panels and streaming spinners. In that case raise both `vhs.width` (or `ttyd.viewport.width`) to at least `1400` so panels do not break, and `vhs.endHoldSeconds` to `4` or more so viewers can read the final answer. A dedicated `references/recording-agent-cli.md` plus starter scenarios are tracked separately.
+
 ## Workflow
 
 1. Resolve `SKILL_ROOT`, then run `python "$SKILL_ROOT/scripts/terminal_capture.py" check`.
