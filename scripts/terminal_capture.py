@@ -17,6 +17,13 @@ from typing import Any
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOTNAME = ".terminal-capture-output"
 DEFAULT_END_HOLD_MS = 2000
+INIT_VALID_ENGINES = ("ttyd", "vhs", "all")
+# Scenario names become file stems on disk and the `name` field VHS uses
+# for tape / output paths. Restrict to characters that are safe on every
+# filesystem and shell we target: ASCII letters and digits to start,
+# followed by letters, digits, `_`, or `-`. No leading dot (hidden file
+# trap), no `/` (path injection), no whitespace.
+INIT_SCENARIO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 VHS_KEY_ALIASES = {
     "ctrl": "Ctrl",
     "control": "Ctrl",
@@ -986,6 +993,156 @@ def probe_media_command(args: argparse.Namespace) -> None:
         print(f"Suggested review times: {','.join(suggested)}")
 
 
+def _init_scenario_template(name: str) -> dict[str, Any]:
+    """Minimal but actually-runnable scenario JSON the user can rerender immediately."""
+    return {
+        "name": name,
+        "cwd": ".",
+        "shell": ["bash", "--noprofile", "--norc", "-i"],
+        "vhs": {
+            "fontSize": 22,
+            "width": 1280,
+            "height": 760,
+            "outputs": ["gif", "mp4"],
+            "endHoldSeconds": 3,
+        },
+        "ttyd": {
+            "fontSize": 20,
+            "viewport": {"width": 1400, "height": 560, "deviceScaleFactor": 2},
+        },
+        "steps": [
+            {
+                "action": "command",
+                "text": "echo hello world",
+                "clear_before": True,
+                "wait_for_text": "hello world",
+                "timeout_ms": 5000,
+                "result_shot": "01-hello",
+            }
+        ],
+    }
+
+
+def _init_render_script(name: str, engine: str) -> str:
+    """Render-wrapper that resolves SKILL_ROOT for both Claude and Codex installs.
+
+    The script is meant to be runnable from any cwd; it first chdirs to
+    its own parent's parent (the project root, by convention), so the
+    scenario path resolves correctly.
+    """
+    return (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        '\n'
+        '# Resolve SKILL_ROOT to either install location; allow override via env.\n'
+        'SKILL_ROOT="${SKILL_ROOT:-$HOME/.claude/skills/terminal-capture-workflow}"\n'
+        'if [ ! -d "$SKILL_ROOT" ]; then\n'
+        '  SKILL_ROOT="$HOME/.codex/skills/terminal-capture-workflow"\n'
+        'fi\n'
+        '\n'
+        'cd "$(dirname "$0")/.."\n'
+        f'python3 "$SKILL_ROOT/scripts/terminal_capture.py" render {engine} '
+        f'scenarios/{name}.json "$@"\n'
+    )
+
+
+def _init_setup_script() -> str:
+    return (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        '\n'
+        "# Put repo-specific prep here. This runs BEFORE the render script.\n"
+        "# Examples:\n"
+        "#   pip install -e .\n"
+        "#   source venv/bin/activate\n"
+        "#   bash scripts/prefetch_fixtures.sh\n"
+    )
+
+
+def init_scenario(
+    name: str,
+    cwd: Path,
+    engine: str = "all",
+    with_setup: bool = False,
+) -> dict[str, Path]:
+    """Materialize the official scenarios/ + scripts/ three-piece layout.
+
+    Creates ``<cwd>/scenarios/<name>.json`` and
+    ``<cwd>/scripts/render_<name>.sh`` (always) plus
+    ``<cwd>/scripts/setup_<name>.sh`` (when ``with_setup=True``). The
+    parent directories are created on demand.
+
+    :raises ValueError: if ``name`` does not match
+        :data:`INIT_SCENARIO_NAME_PATTERN` or ``engine`` is not in
+        :data:`INIT_VALID_ENGINES`.
+    :raises FileExistsError: if any target path already exists. No
+        partial writes are committed on conflict.
+    :returns: A mapping of artifact kind (``"scenario"``,
+        ``"render_script"``, and ``"setup_script"`` when applicable)
+        to the absolute :class:`~pathlib.Path` that was written.
+    """
+    if not INIT_SCENARIO_NAME_PATTERN.match(name or ""):
+        raise ValueError(
+            f"Invalid scenario name: {name!r}. Use ASCII letters / digits / `-` / `_`, "
+            "starting with a letter or digit."
+        )
+    if engine not in INIT_VALID_ENGINES:
+        raise ValueError(
+            f"Unknown engine: {engine!r}. Choose from {INIT_VALID_ENGINES}."
+        )
+
+    cwd = Path(cwd)
+    scenarios_dir = cwd / "scenarios"
+    scripts_dir = cwd / "scripts"
+    scenario_path = scenarios_dir / f"{name}.json"
+    render_path = scripts_dir / f"render_{name}.sh"
+    setup_path = scripts_dir / f"setup_{name}.sh"
+
+    # All-or-nothing existence check before any disk write.
+    planned = [scenario_path, render_path]
+    if with_setup:
+        planned.append(setup_path)
+    for path in planned:
+        if path.exists():
+            raise FileExistsError(f"Refusing to overwrite existing file: {path}")
+
+    scenarios_dir.mkdir(parents=True, exist_ok=True)
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    scenario_path.write_text(
+        json.dumps(_init_scenario_template(name), indent=2) + "\n"
+    )
+
+    render_path.write_text(_init_render_script(name, engine))
+    render_path.chmod(render_path.stat().st_mode | 0o755)
+
+    artifacts: dict[str, Path] = {
+        "scenario": scenario_path,
+        "render_script": render_path,
+    }
+
+    if with_setup:
+        setup_path.write_text(_init_setup_script())
+        setup_path.chmod(setup_path.stat().st_mode | 0o755)
+        artifacts["setup_script"] = setup_path
+
+    return artifacts
+
+
+def init_command(args: argparse.Namespace) -> None:
+    result = init_scenario(
+        args.name,
+        cwd=Path.cwd(),
+        engine=args.engine,
+        with_setup=args.with_setup,
+    )
+    for label, path in result.items():
+        print(f"{label}: {path}")
+    print("")
+    print("Next steps:")
+    print(f"  bash scripts/render_{args.name}.sh")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Check, render, and inspect terminal capture scenarios for ttyd and VHS workflows."
@@ -1009,6 +1166,26 @@ def main() -> None:
     probe_parser = subparsers.add_parser("probe-media", help="Print duration and suggested review timestamps.")
     probe_parser.add_argument("media", help="Path to a GIF, MP4, or WebM file.")
 
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Scaffold scenarios/<name>.json + scripts/render_<name>.sh in the current directory.",
+    )
+    init_parser.add_argument(
+        "name",
+        help="Scenario name (ASCII letters / digits / `-` / `_`, starting with a letter or digit).",
+    )
+    init_parser.add_argument(
+        "--engine",
+        default="all",
+        choices=list(INIT_VALID_ENGINES),
+        help="Engine the generated render script will pass to `render` (default: all).",
+    )
+    init_parser.add_argument(
+        "--with-setup",
+        action="store_true",
+        help="Also scaffold scripts/setup_<name>.sh for repo-specific prep (env vars, fixture warm-up, ...).",
+    )
+
     args = parser.parse_args()
 
     if args.command == "check":
@@ -1022,6 +1199,9 @@ def main() -> None:
         return
     if args.command == "probe-media":
         probe_media_command(args)
+        return
+    if args.command == "init":
+        init_command(args)
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

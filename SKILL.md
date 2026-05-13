@@ -95,22 +95,23 @@ When the target is an agent CLI such as `codex` or `claude`, the UI includes too
    - Prefer `vhs` for `gif`, `mp4`, `webm`, and teaser-style captures.
    - Prefer `all` when the user wants both stills and motion assets from the same flow.
    - If `ttyd` is blocked but `vhs` is ready, use VHS `Screenshot` steps as a fallback for still images.
-6. Create or update a scenario JSON in the user workspace. Set the requested window size in:
+6. If this is a brand-new scenario inside a fresh project (no existing `scenarios/` directory yet), scaffold the three-piece layout with `python "$SKILL_ROOT/scripts/terminal_capture.py" init <name> [--engine ttyd|vhs|all] [--with-setup]`. The command creates `scenarios/<name>.json` (a minimal runnable template), `scripts/render_<name>.sh` (a SKILL_ROOT-resolving wrapper that runs the right engine), and optionally `scripts/setup_<name>.sh` for repo-specific prep. See `references/project-layout.md` for the why and the recommended commit-to-repo workflow.
+7. Create or update a scenario JSON in the user workspace. Set the requested window size in:
    - `ttyd.viewport.width`
    - `ttyd.viewport.height`
    - `vhs.width`
    - `vhs.height`
    - `vhs.endHoldSeconds` when the user wants a specific frozen ending length for GIF or video. If it is omitted, motion outputs default to a short final hold.
-7. For large output, do not force everything into one frame. Route the command through `less -R` or another pager and capture specific pages with `PageDown`.
-8. For fragile commands, wrap them in a helper shell script inside the user workspace instead of keeping a long pipeline inline in the scenario.
-9. Use `input` steps when the user needs more than a single command or reply. Compose `text`, `paste`, `press`, and `sleep` events instead of faking the flow with a giant inline shell command.
-10. When one single shell command is visually too long for the requested terminal width, prefer `command` with `wrap_at_columns` plus prompt-width hints instead of relying on the terminal emulator's natural wrap. This keeps typed long commands readable and avoids overwrite artifacts.
-11. Prefer `ttyd + Playwright` when the user needs exotic key chords that VHS may reject, especially multi-modifier special-key combinations. Use VHS when the user primarily needs motion output.
-12. For `tmux`, `vim`/`vi`, `less`, `fzf`, and other TUI flows, plan around visible state changes and explicit waits, not fixed timing guesses.
-13. Render with `python "$SKILL_ROOT/scripts/terminal_capture.py" render <engine> <scenario-path> [--output-root <dir>]`.
-14. If the user asked for visual verification, or the asset is customer-facing, inspect the final stills directly. For video or GIF, first run `python "$SKILL_ROOT/scripts/terminal_capture.py" probe-media <media>` to get the duration and suggested timestamps, then extract representative frames with `python "$SKILL_ROOT/scripts/terminal_capture.py" extract-frames <media> --times <comma-separated-seconds>`.
-15. If the visual review fails, adjust the scenario and rerender. Do not stop at “the command succeeded” when the artifact itself is the deliverable.
-16. If a prompt or confirmation beat is too brief in motion output, add a short `sleep` step before the reply so the state is legible in GIF or video, then rerender.
+8. For large output, do not force everything into one frame. Route the command through `less -R` or another pager and capture specific pages with `PageDown`.
+9. For fragile commands, wrap them in a helper shell script inside the user workspace instead of keeping a long pipeline inline in the scenario.
+10. Use `input` steps when the user needs more than a single command or reply. Compose `text`, `paste`, `press`, and `sleep` events instead of faking the flow with a giant inline shell command.
+11. When one single shell command is visually too long for the requested terminal width, prefer `command` with `wrap_at_columns` plus prompt-width hints instead of relying on the terminal emulator's natural wrap. This keeps typed long commands readable and avoids overwrite artifacts.
+12. Prefer `ttyd + Playwright` when the user needs exotic key chords that VHS may reject, especially multi-modifier special-key combinations. Use VHS when the user primarily needs motion output.
+13. For `tmux`, `vim`/`vi`, `less`, `fzf`, and other TUI flows, plan around visible state changes and explicit waits, not fixed timing guesses.
+14. Render with `python "$SKILL_ROOT/scripts/terminal_capture.py" render <engine> <scenario-path> [--output-root <dir>]`.
+15. If the user asked for visual verification, or the asset is customer-facing, inspect the final stills directly. For video or GIF, first run `python "$SKILL_ROOT/scripts/terminal_capture.py" probe-media <media>` to get the duration and suggested timestamps, then extract representative frames with `python "$SKILL_ROOT/scripts/terminal_capture.py" extract-frames <media> --times <comma-separated-seconds>`.
+16. If the visual review fails, adjust the scenario and rerender. Do not stop at “the command succeeded” when the artifact itself is the deliverable.
+17. If a prompt or confirmation beat is too brief in motion output, add a short `sleep` step before the reply so the state is legible in GIF or video, then rerender.
 
 ## Common Pitfalls
 
@@ -190,3 +191,4 @@ Inspect the generated media against the user’s actual concern, not just genera
 - Read `references/field-notes.md` first whenever the task looks real, slightly brittle, or user-facing.
 - Read `references/environment-and-install.md` when dependencies are missing or the user asks what to install.
 - Read `references/scenario-patterns.md` when building or editing a scenario for interactive flows, long output, teaser captures, or engine-specific wait rules.
+- Read `references/project-layout.md` when the scenario needs to be committed to a downstream repo and regenerated on demand by teammates or CI.
