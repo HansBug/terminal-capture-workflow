@@ -126,6 +126,76 @@ async function waitForServer(url, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
+async function readBufferText(page) {
+  // Snapshot the full xterm.js buffer (including scrollback) as one
+  // string. Returns "" if window.term isn't available — same defensive
+  // posture as the waitForText pre-check below.
+  return await page.evaluate(() => {
+    const term = window.term;
+    if (!term || !term.buffer || !term.buffer.active) return "";
+    const buf = term.buffer.active;
+    let text = "";
+    const limit = buf.length;
+    for (let i = 0; i < limit; i += 1) {
+      const line = buf.getLine(i);
+      if (!line) continue;
+      text += line.translateToString(false) + "\n";
+    }
+    return text;
+  });
+}
+
+
+function resolveWaitUntilStableMs(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      `wait_until_stable must be an object like {"ms": <int>} or unset, got ${typeof value}: ${JSON.stringify(value)}`,
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(value, "ms")) {
+    throw new Error(`wait_until_stable requires an \`ms\` key; got ${JSON.stringify(value)}`);
+  }
+  const raw = value.ms;
+  if (!Number.isInteger(raw)) {
+    throw new Error(`wait_until_stable.ms must be an integer, got ${typeof raw}: ${JSON.stringify(raw)}`);
+  }
+  if (raw < 0) {
+    throw new Error(`wait_until_stable.ms must be non-negative, got ${raw}`);
+  }
+  return raw;
+}
+
+
+async function waitUntilBufferStable(page, stableMs, timeoutMs) {
+  // After an upstream waitForText fires, hold off the next step until
+  // the rendered terminal text has been unchanged for `stableMs`
+  // milliseconds. Resets the stable-window timer on any change.
+  // `timeoutMs` is the absolute wall-clock cap; if the buffer never
+  // settles within it we return anyway (caller decides what to do).
+  const POLL_MS = 150;
+  if (stableMs <= 0) return;
+  const overallStart = Date.now();
+  let lastText = await readBufferText(page);
+  let stableStart = Date.now();
+  while (Date.now() - overallStart < timeoutMs) {
+    await sleep(POLL_MS);
+    const currentText = await readBufferText(page);
+    if (currentText !== lastText) {
+      lastText = currentText;
+      stableStart = Date.now();
+      continue;
+    }
+    if (Date.now() - stableStart >= stableMs) return;
+  }
+  // Timed out — surface a stderr breadcrumb but don't throw; caller's
+  // own timeout policy already governs the larger flow.
+  process.stderr.write(
+    `[wait_until_stable] buffer still changing after ${timeoutMs}ms — proceeding anyway\n`,
+  );
+}
+
+
 async function waitForText(page, pattern, timeoutMs = 10000, flags = "m") {
   // Fail fast if the xterm.js Buffer API is not reachable. Every
   // supported ttyd build (>=1.7.x) exposes `window.term`, and
@@ -417,6 +487,7 @@ async function runCommandStep(page, outDir, step, typingDelayMs) {
 
   const waitPattern = resolveWaitPattern(step);
   const promptPattern = resolveWaitPromptPattern(step.wait_for_prompt);
+  const stableMs = resolveWaitUntilStableMs(step.wait_until_stable);
   const timeoutMs = step.timeout_ms || 10000;
   if (waitPattern) {
     await waitForText(page, waitPattern, timeoutMs, step.flags || "m");
@@ -429,7 +500,13 @@ async function runCommandStep(page, outDir, step, typingDelayMs) {
     // multiline) applies to both waits, not just the first.
     await waitForText(page, promptPattern, timeoutMs, step.flags || "m");
   }
-  if (!waitPattern && !promptPattern) {
+  if (stableMs !== null) {
+    // Real stability wait — poll the xterm.js buffer for stableMs of
+    // no-change. Bounded by the same step timeout. This is the ttyd
+    // half of wait_until_stable; VHS only gets a degraded Sleep.
+    await waitUntilBufferStable(page, stableMs, timeoutMs);
+  }
+  if (!waitPattern && !promptPattern && stableMs === null) {
     await sleep(step.result_delay_ms || 900);
   }
 
@@ -455,9 +532,15 @@ async function runStep(page, outDir, step, typingDelayMs) {
     case "input":
       await runInputStep(page, step, typingDelayMs);
       return;
-    case "wait_for_text":
-      await waitForText(page, resolveWaitPattern(step), step.timeout_ms || 10000, step.flags || "m");
+    case "wait_for_text": {
+      const timeoutMs = step.timeout_ms || 10000;
+      await waitForText(page, resolveWaitPattern(step), timeoutMs, step.flags || "m");
+      const stableMs = resolveWaitUntilStableMs(step.wait_until_stable);
+      if (stableMs !== null) {
+        await waitUntilBufferStable(page, stableMs, timeoutMs);
+      }
       return;
+    }
     case "wait_for_prompt": {
       const promptPattern = resolveWaitPromptPattern(step.prompt);
       if (!promptPattern) {
