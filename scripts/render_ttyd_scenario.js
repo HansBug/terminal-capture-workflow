@@ -9,6 +9,16 @@ const { chromium } = require("playwright");
 // can override via `ttyd.scrollback`.
 const TTYD_DEFAULT_SCROLLBACK = 5000;
 
+// Default regex matched against the rendered terminal text to detect that
+// a shell prompt has returned after a command finishes. Mirrors
+// DEFAULT_PROMPT_REGEX in scripts/terminal_capture.py.
+//
+// The mirror is enforced by a pytest in tests/test_wait_for_prompt.py
+// (`test_default_prompt_regex_matches_between_python_and_js`) which
+// parses both files and asserts the runtime regex strings match. Don't
+// change one side without the other or that test will fail.
+const DEFAULT_PROMPT_REGEX = "[\\$#%▶❯>]\\s*$";
+
 const BROWSER_CANDIDATES = [
   "google-chrome",
   "google-chrome-stable",
@@ -150,6 +160,22 @@ async function waitForText(page, pattern, timeoutMs = 10000, flags = "m") {
     },
     { source: pattern, regexFlags: flags },
     { timeout: timeoutMs },
+  );
+}
+
+function resolveWaitPromptPattern(value) {
+  if (value === true) return DEFAULT_PROMPT_REGEX;
+  if (value === false || value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    if (value.trim() === "") {
+      throw new Error(
+        `wait_for_prompt must be a bool or a NON-EMPTY string regex; got blank string ${JSON.stringify(value)}`,
+      );
+    }
+    return value;
+  }
+  throw new Error(
+    `wait_for_prompt must be a bool or a string regex, got ${typeof value}: ${JSON.stringify(value)}`,
   );
 }
 
@@ -390,9 +416,20 @@ async function runCommandStep(page, outDir, step, typingDelayMs) {
   await page.keyboard.press("Enter");
 
   const waitPattern = resolveWaitPattern(step);
+  const promptPattern = resolveWaitPromptPattern(step.wait_for_prompt);
+  const timeoutMs = step.timeout_ms || 10000;
   if (waitPattern) {
-    await waitForText(page, waitPattern, step.timeout_ms || 10000, step.flags || "m");
-  } else {
+    await waitForText(page, waitPattern, timeoutMs, step.flags || "m");
+  }
+  if (promptPattern) {
+    // After wait_for_text fires (summary visible) we additionally wait
+    // for the shell prompt to return — same "wait on summary AND on
+    // prompt" guarantee field-notes.md recommends. Share `step.flags`
+    // with wait_for_text so a step-wide flag like `mi` (case-insensitive
+    // multiline) applies to both waits, not just the first.
+    await waitForText(page, promptPattern, timeoutMs, step.flags || "m");
+  }
+  if (!waitPattern && !promptPattern) {
     await sleep(step.result_delay_ms || 900);
   }
 
@@ -421,6 +458,16 @@ async function runStep(page, outDir, step, typingDelayMs) {
     case "wait_for_text":
       await waitForText(page, resolveWaitPattern(step), step.timeout_ms || 10000, step.flags || "m");
       return;
+    case "wait_for_prompt": {
+      const promptPattern = resolveWaitPromptPattern(step.prompt);
+      if (!promptPattern) {
+        throw new Error(
+          "wait_for_prompt action requires `prompt` (true or a non-empty regex string).",
+        );
+      }
+      await waitForText(page, promptPattern, step.timeout_ms || 10000, step.flags || "m");
+      return;
+    }
     case "screenshot":
       await capture(page, outDir, step.name);
       return;

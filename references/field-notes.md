@@ -54,7 +54,19 @@ Better targets for VHS:
 - `first coexistence: ...`
 - short `reason: ...` lines for `UNSAT`
 - headings that appear before long tables start scrolling
-- the prompt itself returning (combine with `|| true` so non-zero exits still return to the prompt)
+- the prompt itself returning — prefer `"wait_for_prompt": true` (matches the shared default prompt regex on both engines) over hand-rolled regexes. Combine with `|| true` so non-zero exits still return to the prompt:
+
+  ```json
+  {
+    "action": "command",
+    "text": "long_command || true",
+    "wait_for_text": "summary line",
+    "wait_for_prompt": true,
+    "timeout_ms": 30000
+  }
+  ```
+
+  The pair "wait on summary, then wait on prompt" is the recommended idiom — `wait_for_text` proves the relevant output appeared, `wait_for_prompt` proves the command actually returned.
 
 Avoid waiting on (in VHS):
 

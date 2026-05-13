@@ -18,6 +18,35 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOTNAME = ".terminal-capture-output"
 DEFAULT_END_HOLD_MS = 2000
 INIT_VALID_ENGINES = ("ttyd", "vhs", "all")
+# Default regex matched against the rendered terminal text to detect that
+# a shell prompt has returned after a command finishes. Covers bash / zsh
+# / sh (`$`), root / `#`, csh / `%`, starship / fish (`❯`, `▶`), and the
+# generic `>` that VHS's default Ubuntu theme uses out of the box.
+#
+# Multiline semantics are passed as a FLAG by each engine rather than
+# baked into the pattern as `(?m)`, because JavaScript's RegExp does not
+# accept the `(?m)` inline-flag syntax (Python and Go do, but parity is
+# easier to enforce one way than three). Python callers must pass
+# `re.MULTILINE`; the ttyd Playwright renderer passes the `"m"` flag
+# to `new RegExp(...)`; for VHS the rendered viewport snapshot ends at
+# the prompt anyway, so Go regexp's default end-of-string `$` happens
+# to coincide with end-of-line at the matching point.
+#
+# Known limitations (use an explicit `wait_for_prompt: "<regex>"` to
+# work around any of these):
+#   * Bash PS2 continuation (multi-line commands inside `for / while /
+#     do … done`, unclosed quotes, heredoc bodies). PS2's default form
+#     is `> `, so the default regex fires on the continuation prompt
+#     before the *outer* command actually returns. Scenarios that drive
+#     multi-line bash should pass a regex without `>` in the class —
+#     e.g. `"wait_for_prompt": "[\\$#%▶❯]\\s*$"`.
+#   * Output content that genuinely ends in a class char (`grep ... >`,
+#     `cat`-ed Markdown with `>` quotes) right before the prompt would
+#     have appeared.
+#   * ASCII-only or missing-glyph terminals where `▶` / `❯` render as
+#     `?` placeholders — the default class won't see the prompt char.
+#     Choose an explicit ASCII-only prompt or `wait_for_text` instead.
+DEFAULT_PROMPT_REGEX = r"[\$#%▶❯>]\s*$"
 # Scenario names become file stems on disk and the `name` field VHS uses
 # for tape / output paths. Restrict to characters that are safe on every
 # filesystem and shell we target: ASCII letters and digits to start,
@@ -222,6 +251,40 @@ def escape_vhs_text(text: str) -> str:
 
 def escape_vhs_regex(pattern: str) -> str:
     return pattern.replace("/", "\\/")
+
+
+def resolve_wait_prompt_pattern(value: Any) -> str | None:
+    """Translate a ``wait_for_prompt`` field value to a regex string or ``None``.
+
+    Accepted shapes:
+
+    - ``True`` → :data:`DEFAULT_PROMPT_REGEX`
+    - ``str`` whose :meth:`str.strip` is non-empty → used verbatim as a regex
+    - ``False`` / ``None`` / unset → ``None`` (no prompt wait)
+
+    Any other shape raises :class:`ValueError` so typos surface
+    immediately rather than silently no-op. In particular this includes:
+
+    - blank-only strings (``""``, ``"   "``, ``"\\t"``) — almost certainly
+      a typo, never a useful regex. If you really want to match
+      whitespace, write ``"\\\\s+"`` or similar.
+    - non-bool / non-string values (numbers, lists, dicts, …).
+    """
+    if value is True:
+        return DEFAULT_PROMPT_REGEX
+    if value is False or value is None:
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            raise ValueError(
+                "wait_for_prompt must be a bool or a NON-EMPTY string regex; "
+                f"got blank string {value!r}"
+            )
+        return value
+    raise ValueError(
+        "wait_for_prompt must be a bool or a string regex, got "
+        f"{type(value).__name__}: {value!r}"
+    )
 
 
 def resolve_wait_pattern(step: dict[str, Any], engine: str) -> str | None:
@@ -783,6 +846,15 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
             timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             pattern = resolve_wait_pattern(step, "vhs")
             lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(pattern)}/')
+        elif action == "wait_for_prompt":
+            prompt_pattern = resolve_wait_prompt_pattern(step.get("prompt"))
+            if not prompt_pattern:
+                raise ValueError(
+                    "wait_for_prompt action requires `prompt` (true or a non-empty regex string)."
+                )
+            timeout = step.get("timeout_ms")
+            timeout_part = f'@{format_duration(timeout)}' if timeout else ""
+            lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(prompt_pattern)}/')
         elif action == "screenshot":
             screenshot_path = out_dir / f'{step["name"]}.png'
             lines.append(f'Screenshot "{screenshot_path.as_posix()}"')
@@ -804,11 +876,19 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
                 lines.append(f"Sleep {format_duration(screenshot_settle_ms)}")
             lines.append("Enter")
             wait_pattern = resolve_wait_pattern(step, "vhs")
+            prompt_pattern = resolve_wait_prompt_pattern(step.get("wait_for_prompt"))
+            timeout = step.get("timeout_ms")
+            timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             if wait_pattern:
-                timeout = step.get("timeout_ms")
-                timeout_part = f'@{format_duration(timeout)}' if timeout else ""
                 lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(wait_pattern)}/')
-            else:
+            if prompt_pattern:
+                # wait_for_text fires on the first occurrence of a summary
+                # line; wait_for_prompt fires once the shell has actually
+                # returned to a prompt. Emitting the prompt wait *after*
+                # the text wait gives the "summary visible AND command
+                # finished" guarantee that field-notes recommends.
+                lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(prompt_pattern)}/')
+            if not wait_pattern and not prompt_pattern:
                 lines.append(f'Sleep {format_duration(step.get("result_delay_ms", 900))}')
             if step.get("result_shot"):
                 result_path = out_dir / f'{step["result_shot"]}.png'
