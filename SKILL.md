@@ -67,7 +67,7 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | step `command` | `timeout_ms` | 10000 | Slow command (solver / network) |
 | step `command` | `result_delay_ms` | 900 | Only when no `wait_for_text` and no `wait_for_prompt` |
 | step `command` | `typed_shot` / `result_shot` | unset | Auto-capture at typed / result moments |
-| step `command` / action `wait_for_prompt` | `wait_for_prompt` / `prompt` | unset | `true` waits on the default prompt regex (`[\$#%▶❯>]\s*$`); a string is used verbatim as a regex |
+| step `command` / action `wait_for_prompt` | `wait_for_prompt` / `prompt` | unset | `true` waits on the default prompt regex `(?m)[\$#%▶❯>]\s*$` (covers VHS's default `>` Ubuntu theme); a string is used verbatim as a regex. Known limitation: matches bash PS2 / heredoc `> ` continuation too — drive multi-line bash with an explicit prompt regex |
 | step | `pattern_by_engine` / `wait_for_text_by_engine` | unset | Different prompts per engine |
 
 ## Engine Decision Tree

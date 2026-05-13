@@ -66,7 +66,7 @@ For motion outputs, `endHoldSeconds` controls how long the final frame stays on 
 - `wait_for_text`
   - Wait until the rendered terminal text contains the expected pattern (regex). On ttyd this covers the entire scrollback buffer; on VHS it covers the current viewport.
 - `wait_for_prompt`
-  - Wait until a shell prompt has returned. `"prompt": true` uses the shared default regex (`[\$#%▶❯>]\s*$` — bash / zsh / sh / csh / fish / starship / `>`-style); `"prompt": "<regex>"` uses your own pattern. Can be combined with `wait_for_text` on a `command` step (`"wait_for_text": "summary", "wait_for_prompt": true`) for the "wait on summary AND wait on prompt return" idiom recommended in `field-notes.md`.
+  - Wait until a shell prompt has returned. `"prompt": true` uses the shared default regex `[\$#%▶❯>]\s*$` (covers bash / zsh / sh `$`, root `#`, csh `%`, starship / fish `❯` / `▶`, and VHS's default Ubuntu-theme `>`). Multiline semantics are passed as a flag by the renderers (Python `re.MULTILINE`, JS `"m"`, Go regexp matches end-of-string at viewport end). `"prompt": "<regex>"` uses your own pattern. Can be combined with `wait_for_text` on a `command` step (`"wait_for_text": "summary", "wait_for_prompt": true`) for the "wait on summary AND wait on prompt return" idiom recommended in `field-notes.md`. **Known limitation:** because PS2 continuation, heredoc body, and Markdown-style `> quotes` also start with `> `, the default regex matches them too — scenarios that drive multi-line bash (`for … do …`, unclosed quotes, heredocs) should pass an explicit regex without `>` in the class, e.g. `"wait_for_prompt": "[\\$#%▶❯]\\s*$"`.
 - `screenshot`
   - Capture a still at the current stage.
 - `sleep`
