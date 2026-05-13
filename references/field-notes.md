@@ -82,6 +82,50 @@ Better:
 }
 ```
 
+Sanitized ttyd example — previously infeasible because the marker scrolls out, now reliable because the wait reads the full xterm.js scrollback buffer:
+
+```json
+{
+  "action": "command",
+  "text": "for i in $(seq 1 200); do echo line $i; done; echo done",
+  "wait_for_text": "line 42",
+  "timeout_ms": 15000
+}
+```
+
+### Canonical reproducer: ttyd scrollback wait
+
+Use this when you suspect the buffer-based path has regressed (e.g. after a ttyd or xterm.js upgrade). The scenario forces an "early marker, then 100 padding lines past the viewport, then a final marker" shape so the wait must reach scrollback to succeed.
+
+```json
+{
+  "name": "ttyd-scrollback-bug",
+  "cwd": "/tmp",
+  "shell": ["bash", "--noprofile", "--norc", "-i"],
+  "ttyd": {
+    "fontSize": 14,
+    "viewport": {"width": 900, "height": 380, "deviceScaleFactor": 2}
+  },
+  "steps": [
+    {
+      "action": "command",
+      "text": "echo SCROLLBACK_EARLY_4f3a7c; for i in $(seq 1 100); do echo padding line $i; done; echo CMD_FINISHED",
+      "clear_before": true,
+      "wait_for_text": "CMD_FINISHED",
+      "timeout_ms": 15000
+    },
+    {
+      "action": "wait_for_text",
+      "pattern": "SCROLLBACK_EARLY_4f3a7c",
+      "timeout_ms": 5000
+    },
+    {"action": "screenshot", "name": "verified"}
+  ]
+}
+```
+
+Run it with `python3 scripts/terminal_capture.py render ttyd <path-to-scenario>`. On a healthy install the second `wait_for_text` succeeds quickly and produces `verified.png`. On a regressed install — `window.term` renamed, scrollback option ignored, or the buffer API misused — the renderer now fails fast with an explicit error pointing back to this section, not a generic Playwright timeout.
+
 ## Long Command Typing Needs Column-Aware Wrapping
 
 Natural terminal wrapping is not reliable enough for capture automation.

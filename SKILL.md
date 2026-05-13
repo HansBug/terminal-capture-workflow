@@ -41,7 +41,7 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | ttyd | `cursorBlink` | true | Disable for cleaner stills |
 | ttyd | `theme` | xterm default | Custom color theme |
 | ttyd | `rendererType` | `"dom"` | Switch to `canvas` / `webgl` only if DOM rendering misbehaves |
-| ttyd | `scrollback` | 5000 | Raise for very long output runs; `wait_for_text` matches the entire scrollback buffer |
+| ttyd | `scrollback` | 5000 (raised from xterm.js's built-in 1000) | Raise for very long output runs; `wait_for_text` matches the entire scrollback buffer |
 | vhs | `width` | 1280 | Match ttyd viewport |
 | vhs | `height` | 760 | Match ttyd viewport |
 | vhs | `fontSize` | 22 | Readability |
