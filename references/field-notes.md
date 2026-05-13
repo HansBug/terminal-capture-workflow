@@ -41,22 +41,30 @@ Sanitized example:
 
 ## Prefer Stable Wait Targets Over Final-Frame Guesses
 
-The most common failure mode in long outputs is waiting for a string that only appears near the end of a long table.
+How `wait_for_text` resolves a pattern differs between the two engines:
 
-Better targets:
+- **ttyd** reads the full xterm.js scrollback buffer (default 5000 lines, configurable via `ttyd.scrollback`), so a pattern can match even after it has scrolled out of the visible viewport.
+- **VHS** uses `Wait+Screen /pattern/`, which only matches what is currently on screen. A line that has scrolled past the bottom is gone for VHS.
+
+For **VHS scenarios**, the original advice still applies — wait on text that is still visible when the command settles. The most common failure mode is waiting for a string that only appears near the end of a long table and gets pushed out before VHS's pattern check runs.
+
+Better targets for VHS:
 
 - summary lines such as `status: SAT`
 - `first coexistence: ...`
 - short `reason: ...` lines for `UNSAT`
 - headings that appear before long tables start scrolling
+- the prompt itself returning (combine with `|| true` so non-zero exits still return to the prompt)
 
-Avoid waiting on:
+Avoid waiting on (in VHS):
 
 - the final line of a long table
 - a row that only becomes visible after the terminal scrolls
 - highly formatted trailing output that may be cropped or paged differently between engines
 
-Sanitized example:
+For **ttyd scenarios**, this constraint is relaxed: waiting on any line that appears anywhere in the run — including a string that briefly flashed by during a large dump — is reliable as long as it falls within `ttyd.scrollback`. If a single capture genuinely needs more than the default 5000 lines, raise `ttyd.scrollback` rather than working around it with brittle viewport assumptions.
+
+Sanitized VHS example:
 
 Bad:
 

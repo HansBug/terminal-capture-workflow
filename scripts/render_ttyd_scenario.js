@@ -113,8 +113,26 @@ async function waitForServer(url, timeoutMs = 10000) {
 async function waitForText(page, pattern, timeoutMs = 10000, flags = "m") {
   await page.waitForFunction(
     ({ source, regexFlags }) => {
-      const text = document.querySelector(".xterm-rows")?.innerText || "";
-      return new RegExp(source, regexFlags).test(text);
+      // Prefer the xterm.js Buffer API — it covers the entire scrollback,
+      // not just the visible viewport, so a pattern that has already
+      // scrolled out of view is still matchable. Fall back to scraping
+      // the visible DOM if the terminal global is not yet exposed
+      // (e.g. very old ttyd builds, or before the page has finished
+      // initializing).
+      const term = window.term || window.__ttydTerm;
+      if (term && term.buffer && term.buffer.active) {
+        const buf = term.buffer.active;
+        let text = "";
+        const limit = buf.length;
+        for (let i = 0; i < limit; i += 1) {
+          const line = buf.getLine(i);
+          if (!line) continue;
+          text += line.translateToString(false) + "\n";
+        }
+        return new RegExp(source, regexFlags).test(text);
+      }
+      const dom = document.querySelector(".xterm-rows")?.innerText || "";
+      return new RegExp(source, regexFlags).test(dom);
     },
     { source: pattern, regexFlags: flags },
     { timeout: timeoutMs },
@@ -426,6 +444,11 @@ async function main() {
     ["fontSize", String(ttydConfig.fontSize || 20)],
     ["cursorBlink", String(ttydConfig.cursorBlink !== false)],
     ["rendererType", ttydConfig.rendererType || "dom"],
+    // scrollback bounds how far back the xterm.js buffer (and therefore
+    // buffer-based waitForText) can match. Default raised from xterm.js
+    // built-in 1000 to 5000 to cover typical long-output captures
+    // without forcing every scenario to opt in.
+    ["scrollback", String(ttydConfig.scrollback != null ? ttydConfig.scrollback : 5000)],
   ];
 
   if (ttydConfig.theme) {
