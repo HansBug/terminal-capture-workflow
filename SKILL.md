@@ -41,6 +41,7 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | ttyd | `cursorBlink` | true | Disable for cleaner stills |
 | ttyd | `theme` | xterm default | Custom color theme |
 | ttyd | `rendererType` | `"dom"` | Switch to `canvas` / `webgl` only if DOM rendering misbehaves |
+| ttyd | `scrollback` | 5000 (raised from xterm.js's built-in 1000) | Raise for very long output runs; `wait_for_text` matches the entire scrollback buffer |
 | vhs | `width` | 1280 | Match ttyd viewport |
 | vhs | `height` | 760 | Match ttyd viewport |
 | vhs | `fontSize` | 22 | Readability |
@@ -115,11 +116,11 @@ When the target is an agent CLI such as `codex` or `claude`, the UI includes too
 
 Three failure modes recur across real downstream usage. They are also documented in `references/field-notes.md`; they appear here because new scenarios still hit them on the first attempt.
 
-### 1. `wait_for_text` is viewport-bounded on both engines
+### 1. VHS `wait_for_text` is viewport-bounded
 
-VHS `Wait+Screen /pattern/` only matches text currently visible on screen. ttyd's current `waitForText` reads the `.xterm-rows` DOM, which also only contains visible rows. When command output exceeds one screen, the target line scrolls out of view and the wait will time out — even though the pattern clearly appeared.
+VHS `Wait+Screen /pattern/` only matches text currently visible on screen. When command output exceeds one screen, the target line scrolls out of view and VHS's wait will time out — even though the pattern clearly appeared. ttyd no longer has this constraint (it reads the full xterm.js scrollback buffer; see `ttyd.scrollback` in the quick reference for the default), but **VHS does**.
 
-Fix: wait for the prompt to return, not for an intermediate line. Append `|| true` so non-zero exits still return to the prompt.
+Fix (VHS): wait for the prompt to return, not for an intermediate line. Append `|| true` so non-zero exits still return to the prompt.
 
 ```json
 {

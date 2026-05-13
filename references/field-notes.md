@@ -41,22 +41,30 @@ Sanitized example:
 
 ## Prefer Stable Wait Targets Over Final-Frame Guesses
 
-The most common failure mode in long outputs is waiting for a string that only appears near the end of a long table.
+How `wait_for_text` resolves a pattern differs between the two engines:
 
-Better targets:
+- **ttyd** reads the full xterm.js scrollback buffer (default 5000 lines, configurable via `ttyd.scrollback`), so a pattern can match even after it has scrolled out of the visible viewport.
+- **VHS** uses `Wait+Screen /pattern/`, which only matches what is currently on screen. A line that has scrolled past the bottom is gone for VHS.
+
+For **VHS scenarios**, the original advice still applies — wait on text that is still visible when the command settles. The most common failure mode is waiting for a string that only appears near the end of a long table and gets pushed out before VHS's pattern check runs.
+
+Better targets for VHS:
 
 - summary lines such as `status: SAT`
 - `first coexistence: ...`
 - short `reason: ...` lines for `UNSAT`
 - headings that appear before long tables start scrolling
+- the prompt itself returning (combine with `|| true` so non-zero exits still return to the prompt)
 
-Avoid waiting on:
+Avoid waiting on (in VHS):
 
 - the final line of a long table
 - a row that only becomes visible after the terminal scrolls
 - highly formatted trailing output that may be cropped or paged differently between engines
 
-Sanitized example:
+For **ttyd scenarios**, this constraint is relaxed: waiting on any line that appears anywhere in the run — including a string that briefly flashed by during a large dump — is reliable as long as it falls within `ttyd.scrollback`. If a single capture genuinely needs more than the default 5000 lines, raise `ttyd.scrollback` rather than working around it with brittle viewport assumptions.
+
+Sanitized VHS example:
 
 Bad:
 
@@ -73,6 +81,50 @@ Better:
   "wait_for_text": "first coexistence: t20 = 66"
 }
 ```
+
+Sanitized ttyd example — previously infeasible because the marker scrolls out, now reliable because the wait reads the full xterm.js scrollback buffer:
+
+```json
+{
+  "action": "command",
+  "text": "for i in $(seq 1 200); do echo line $i; done; echo done",
+  "wait_for_text": "line 42",
+  "timeout_ms": 15000
+}
+```
+
+### Canonical reproducer: ttyd scrollback wait
+
+Use this when you suspect the buffer-based path has regressed (e.g. after a ttyd or xterm.js upgrade). The scenario forces an "early marker, then 100 padding lines past the viewport, then a final marker" shape so the wait must reach scrollback to succeed.
+
+```json
+{
+  "name": "ttyd-scrollback-bug",
+  "cwd": "/tmp",
+  "shell": ["bash", "--noprofile", "--norc", "-i"],
+  "ttyd": {
+    "fontSize": 14,
+    "viewport": {"width": 900, "height": 380, "deviceScaleFactor": 2}
+  },
+  "steps": [
+    {
+      "action": "command",
+      "text": "echo SCROLLBACK_EARLY_4f3a7c; for i in $(seq 1 100); do echo padding line $i; done; echo CMD_FINISHED",
+      "clear_before": true,
+      "wait_for_text": "CMD_FINISHED",
+      "timeout_ms": 15000
+    },
+    {
+      "action": "wait_for_text",
+      "pattern": "SCROLLBACK_EARLY_4f3a7c",
+      "timeout_ms": 5000
+    },
+    {"action": "screenshot", "name": "verified"}
+  ]
+}
+```
+
+Run it with `python3 scripts/terminal_capture.py render ttyd <path-to-scenario>`. On a healthy install the second `wait_for_text` succeeds quickly and produces `verified.png`. On a regressed install — `window.term` renamed, scrollback option ignored, or the buffer API misused — the renderer now fails fast with an explicit error pointing back to this section, not a generic Playwright timeout.
 
 ## Long Command Typing Needs Column-Aware Wrapping
 

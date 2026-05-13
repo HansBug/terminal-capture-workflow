@@ -3,6 +3,12 @@ const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 
+// scrollback bounds how far back the xterm.js buffer (and therefore
+// buffer-based waitForText) can match. Raised from xterm.js's built-in
+// 1000 so most long-output captures work without opting in; scenarios
+// can override via `ttyd.scrollback`.
+const TTYD_DEFAULT_SCROLLBACK = 5000;
+
 const BROWSER_CANDIDATES = [
   "google-chrome",
   "google-chrome-stable",
@@ -111,9 +117,35 @@ async function waitForServer(url, timeoutMs = 10000) {
 }
 
 async function waitForText(page, pattern, timeoutMs = 10000, flags = "m") {
+  // Fail fast if the xterm.js Buffer API is not reachable. Every
+  // supported ttyd build (>=1.7.x) exposes `window.term`, and
+  // waitForText is only ever called after the page has been focused,
+  // so reaching here without a usable buffer means the upstream API
+  // has shifted. Surface that loudly rather than silently sliding
+  // back into the viewport-bounded mode this code path was written
+  // to remove — a downgrade would just resurrect the original
+  // wait-race bug and hide behind a generic Playwright timeout.
+  const hasTermBuffer = await page.evaluate(() => {
+    const term = window.term;
+    return !!(term && term.buffer && term.buffer.active);
+  });
+  if (!hasTermBuffer) {
+    throw new Error(
+      "xterm.js Buffer API not reachable via window.term — cannot scan ttyd scrollback for wait_for_text. " +
+        "This usually indicates a ttyd / xterm.js upgrade renamed the global; rerun the canonical reproducer in references/field-notes.md.",
+    );
+  }
+
   await page.waitForFunction(
     ({ source, regexFlags }) => {
-      const text = document.querySelector(".xterm-rows")?.innerText || "";
+      const buf = window.term.buffer.active;
+      let text = "";
+      const limit = buf.length;
+      for (let i = 0; i < limit; i += 1) {
+        const line = buf.getLine(i);
+        if (!line) continue;
+        text += line.translateToString(false) + "\n";
+      }
       return new RegExp(source, regexFlags).test(text);
     },
     { source: pattern, regexFlags: flags },
@@ -426,6 +458,14 @@ async function main() {
     ["fontSize", String(ttydConfig.fontSize || 20)],
     ["cursorBlink", String(ttydConfig.cursorBlink !== false)],
     ["rendererType", ttydConfig.rendererType || "dom"],
+    [
+      "scrollback",
+      String(
+        ttydConfig.scrollback != null
+          ? ttydConfig.scrollback
+          : TTYD_DEFAULT_SCROLLBACK,
+      ),
+    ],
   ];
 
   if (ttydConfig.theme) {
