@@ -106,7 +106,17 @@ npx playwright install chromium
 python scripts/terminal_capture.py check
 ```
 
-渲染 scenario：
+在你的项目里一键生成一个 scenario 的三件套骨架（scenario JSON + render 脚本 + 可选 setup 脚本）：
+
+```bash
+python scripts/terminal_capture.py init my-demo --engine vhs --with-setup
+# → scenarios/my-demo.json, scripts/render_my-demo.sh, scripts/setup_my-demo.sh
+bash scripts/render_my-demo.sh
+```
+
+完整 rationale、输出路径约定、README badge / CI 接入方式见 [`references/project-layout.md`](./references/project-layout.md)。
+
+渲染已有 scenario：
 
 ```bash
 python scripts/terminal_capture.py render all /path/to/scenario.json
