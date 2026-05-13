@@ -247,7 +247,15 @@ function wrapShellCommandText(
       }
     }
 
-    const chunk = normalized.slice(start, breakIndex).replace(/\s+$/, "");
+    let chunk = normalized.slice(start, breakIndex).replace(/\s+$/, "");
+    if (!chunk) {
+      return normalized;
+    }
+
+    while (chunk.endsWith("\\")) {
+      chunk = chunk.slice(0, -1);
+      breakIndex -= 1;
+    }
     if (!chunk) {
       return normalized;
     }

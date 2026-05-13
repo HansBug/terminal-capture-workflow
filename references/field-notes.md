@@ -125,6 +125,47 @@ Practical rule:
 - for VHS typed command text, escape quotes and control characters
 - do not double-escape backslashes that are meant to be typed literally
 
+### Empirical probe: VHS Type string semantics
+
+When changing how the renderer escapes characters inside VHS `Type "..."` strings, verify directly against the local `vhs` binary instead of guessing at parser behavior. The procedure below captures what VHS actually types by writing it through a shell heredoc and inspecting the resulting file with `cat -A` — no GIF reading required. This is the probe that confirmed PR #15's decision to leave `escape_vhs_text` alone.
+
+```bash
+probe_typed() {
+  local label="$1" type_arg="$2"
+  rm -f /tmp/captured.txt
+  cat > /tmp/vhs-typed-probe.tape <<EOF
+Output "/tmp/typed-probe.gif"
+Set Shell "bash"
+Set Width 800
+Set Height 200
+Sleep 200ms
+Type "cat > /tmp/captured.txt <<'EOF_INNER'"
+Enter
+Type ${type_arg}
+Enter
+Type "EOF_INNER"
+Enter
+Sleep 400ms
+EOF
+  vhs /tmp/vhs-typed-probe.tape >/dev/null 2>&1
+  printf "  %-30s typed: %s\n" "$label" "$(cat -A /tmp/captured.txt | head -1)"
+}
+
+probe_typed "literal text"        '"hello"'
+probe_typed "\\ in middle"        '"a\b"'
+probe_typed "\\ before close \""  '"trail\"'
+probe_typed "\\\\ in middle"      '"x\\y"'
+probe_typed "\\\\ before close"   '"tail\\"'
+```
+
+Findings (vhs from the official Charm apt repo, May 2026, verified on Ubuntu):
+
+- A bare `\` followed by a non-reserved char is typed literally (`"a\b"` types `a\b`).
+- A bare `\` immediately before the closing `"` is typed literally (`"trail\"` types `trail\`); it does NOT collide with the close-quote.
+- A `\\` sequence is typed as **two** literal backslashes (`"tail\\"` types `tail\\`). VHS does NOT unescape `\\` back to a single `\`.
+
+Implication for `escape_vhs_text`: doubling literal backslashes on the way in would cause the typed terminal to receive two `\` chars where the user wrote one, breaking shell parsing. This is exactly what the "Practical rule" above already warns against, and what issue #3's withdrawn fix attempted. If a future change appears to require backslash doubling, rerun this probe before committing — and if VHS's behavior really did change, update the probe outputs here in the same PR.
+
 ## ttyd And VHS Need Different Kinds Of Setup
 
 For screenshots, ttyd can start directly with a custom shell or rcfile.

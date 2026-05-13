@@ -119,6 +119,19 @@ def wrap_shell_command_text(
     The wrapped text stays shell-equivalent by inserting ``\\`` before each
     synthetic newline. Breaks prefer whitespace outside quoted regions.
 
+    If a forced break would land on one or more literal backslashes, those
+    backslashes are rolled back into the head of the next chunk so the
+    rendered line never ends in ``\\ \\`` (which a shell parses as
+    escaped-space plus literal backslash, not as line continuation).
+
+    Pathological fallback (silent, by design): if rolling back the trailing
+    backslashes empties the chunk entirely — i.e., the input is dominated by
+    literal ``\\`` characters with no break-friendly content before them —
+    the function returns the original text unchanged. Wrapping is silently
+    disabled rather than producing a broken continuation line. Callers that
+    care about whether wrapping happened can compare the return value to
+    the input.
+
     :param text: Raw shell command text.
     :type text: str
     :param wrap_at_columns: Maximum display width before wrapping.
@@ -130,7 +143,8 @@ def wrap_shell_command_text(
     :param continuation_prompt_columns: Visible prompt width on wrapped
         continuation lines.
     :type continuation_prompt_columns: int, optional
-    :return: Wrapped shell command text.
+    :return: Wrapped shell command text, or the input unchanged when no
+        safe wrap is possible.
     :rtype: str
     """
     wrap_at_columns = max(20, int(wrap_at_columns))
@@ -164,6 +178,12 @@ def wrap_shell_command_text(
                 return normalized
 
         chunk = normalized[start:break_index].rstrip()
+        if not chunk:
+            return normalized
+
+        while chunk.endswith("\\"):
+            chunk = chunk[:-1]
+            break_index -= 1
         if not chunk:
             return normalized
 
