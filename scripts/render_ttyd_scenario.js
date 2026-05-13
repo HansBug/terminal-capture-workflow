@@ -9,6 +9,11 @@ const { chromium } = require("playwright");
 // can override via `ttyd.scrollback`.
 const TTYD_DEFAULT_SCROLLBACK = 5000;
 
+// Default regex matched against the rendered terminal text to detect that
+// a shell prompt has returned after a command finishes. Mirrors
+// DEFAULT_PROMPT_REGEX in scripts/terminal_capture.py — keep these in sync.
+const DEFAULT_PROMPT_REGEX = "[\\$#%▶❯>]\\s*$";
+
 const BROWSER_CANDIDATES = [
   "google-chrome",
   "google-chrome-stable",
@@ -152,6 +157,16 @@ async function waitForText(page, pattern, timeoutMs = 10000, flags = "m") {
     { timeout: timeoutMs },
   );
 }
+
+function resolveWaitPromptPattern(value) {
+  if (value === true) return DEFAULT_PROMPT_REGEX;
+  if (typeof value === "string") return value || null;
+  if (value === false || value === null || value === undefined) return null;
+  throw new Error(
+    `wait_for_prompt must be a bool or a string regex, got ${typeof value}: ${JSON.stringify(value)}`,
+  );
+}
+
 
 function resolveWaitPattern(step) {
   if (step.pattern_by_engine && step.pattern_by_engine.ttyd) {
@@ -390,9 +405,19 @@ async function runCommandStep(page, outDir, step, typingDelayMs) {
   await page.keyboard.press("Enter");
 
   const waitPattern = resolveWaitPattern(step);
+  const promptPattern = resolveWaitPromptPattern(step.wait_for_prompt);
+  const timeoutMs = step.timeout_ms || 10000;
   if (waitPattern) {
-    await waitForText(page, waitPattern, step.timeout_ms || 10000, step.flags || "m");
-  } else {
+    await waitForText(page, waitPattern, timeoutMs, step.flags || "m");
+  }
+  if (promptPattern) {
+    // After wait_for_text fires (summary visible) we additionally wait
+    // for the shell prompt to return — same "wait on summary AND on
+    // prompt" guarantee field-notes.md recommends. The pattern uses
+    // multiline mode so it matches a prompt on its own line.
+    await waitForText(page, promptPattern, timeoutMs, "m");
+  }
+  if (!waitPattern && !promptPattern) {
     await sleep(step.result_delay_ms || 900);
   }
 
@@ -421,6 +446,16 @@ async function runStep(page, outDir, step, typingDelayMs) {
     case "wait_for_text":
       await waitForText(page, resolveWaitPattern(step), step.timeout_ms || 10000, step.flags || "m");
       return;
+    case "wait_for_prompt": {
+      const promptPattern = resolveWaitPromptPattern(step.prompt);
+      if (!promptPattern) {
+        throw new Error(
+          "wait_for_prompt action requires `prompt` (true or a non-empty regex string).",
+        );
+      }
+      await waitForText(page, promptPattern, step.timeout_ms || 10000, "m");
+      return;
+    }
     case "screenshot":
       await capture(page, outDir, step.name);
       return;

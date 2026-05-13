@@ -18,6 +18,14 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOTNAME = ".terminal-capture-output"
 DEFAULT_END_HOLD_MS = 2000
 INIT_VALID_ENGINES = ("ttyd", "vhs", "all")
+# Default regex matched against the rendered terminal text to detect that
+# a shell prompt has returned after a command finishes. Covers bash / zsh
+# / sh (`$`), root / `#`, csh / `%`, starship / fish (`❯`, `▶`), and the
+# generic `>`. `\s*$` absorbs trailing whitespace so the pattern still
+# matches when there are trailing blank rows in the viewport snapshot.
+# Callers wanting a different prompt shape can pass an explicit regex via
+# `wait_for_prompt: "<regex>"` on the step.
+DEFAULT_PROMPT_REGEX = r"[\$#%▶❯>]\s*$"
 # Scenario names become file stems on disk and the `name` field VHS uses
 # for tape / output paths. Restrict to characters that are safe on every
 # filesystem and shell we target: ASCII letters and digits to start,
@@ -222,6 +230,31 @@ def escape_vhs_text(text: str) -> str:
 
 def escape_vhs_regex(pattern: str) -> str:
     return pattern.replace("/", "\\/")
+
+
+def resolve_wait_prompt_pattern(value: Any) -> str | None:
+    """Translate a ``wait_for_prompt`` field value to a regex string or ``None``.
+
+    Accepted shapes:
+
+    - ``True`` → :data:`DEFAULT_PROMPT_REGEX`
+    - Non-empty ``str`` → the string is used verbatim as a regex
+    - ``False`` / ``None`` / unset / empty string → ``None`` (no prompt wait)
+
+    Any other type raises :class:`ValueError` so typos like
+    ``wait_for_prompt: 1`` surface immediately rather than silently
+    no-op.
+    """
+    if value is True:
+        return DEFAULT_PROMPT_REGEX
+    if isinstance(value, str):
+        return value or None
+    if value is False or value is None:
+        return None
+    raise ValueError(
+        "wait_for_prompt must be a bool or a string regex, got "
+        f"{type(value).__name__}: {value!r}"
+    )
 
 
 def resolve_wait_pattern(step: dict[str, Any], engine: str) -> str | None:
@@ -783,6 +816,15 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
             timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             pattern = resolve_wait_pattern(step, "vhs")
             lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(pattern)}/')
+        elif action == "wait_for_prompt":
+            prompt_pattern = resolve_wait_prompt_pattern(step.get("prompt"))
+            if not prompt_pattern:
+                raise ValueError(
+                    "wait_for_prompt action requires `prompt` (true or a non-empty regex string)."
+                )
+            timeout = step.get("timeout_ms")
+            timeout_part = f'@{format_duration(timeout)}' if timeout else ""
+            lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(prompt_pattern)}/')
         elif action == "screenshot":
             screenshot_path = out_dir / f'{step["name"]}.png'
             lines.append(f'Screenshot "{screenshot_path.as_posix()}"')
@@ -804,11 +846,19 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
                 lines.append(f"Sleep {format_duration(screenshot_settle_ms)}")
             lines.append("Enter")
             wait_pattern = resolve_wait_pattern(step, "vhs")
+            prompt_pattern = resolve_wait_prompt_pattern(step.get("wait_for_prompt"))
+            timeout = step.get("timeout_ms")
+            timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             if wait_pattern:
-                timeout = step.get("timeout_ms")
-                timeout_part = f'@{format_duration(timeout)}' if timeout else ""
                 lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(wait_pattern)}/')
-            else:
+            if prompt_pattern:
+                # wait_for_text fires on the first occurrence of a summary
+                # line; wait_for_prompt fires once the shell has actually
+                # returned to a prompt. Emitting the prompt wait *after*
+                # the text wait gives the "summary visible AND command
+                # finished" guarantee that field-notes recommends.
+                lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(prompt_pattern)}/')
+            if not wait_pattern and not prompt_pattern:
                 lines.append(f'Sleep {format_duration(step.get("result_delay_ms", 900))}')
             if step.get("result_shot"):
                 result_path = out_dir / f'{step["result_shot"]}.png'

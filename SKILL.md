@@ -65,8 +65,9 @@ Tunable fields, grouped by scope. Anything not listed here is in `references/sce
 | step `command` | `wrap_indent` | 2 | Continuation-line indent |
 | step `command` | `clear_before` | false | `Ctrl+L` before typing |
 | step `command` | `timeout_ms` | 10000 | Slow command (solver / network) |
-| step `command` | `result_delay_ms` | 900 | Only when no `wait_for_text` |
+| step `command` | `result_delay_ms` | 900 | Only when no `wait_for_text` and no `wait_for_prompt` |
 | step `command` | `typed_shot` / `result_shot` | unset | Auto-capture at typed / result moments |
+| step `command` / action `wait_for_prompt` | `wait_for_prompt` / `prompt` | unset | `true` waits on the default prompt regex (`[\$#%▶❯>]\s*$`); a string is used verbatim as a regex |
 | step | `pattern_by_engine` / `wait_for_text_by_engine` | unset | Different prompts per engine |
 
 ## Engine Decision Tree
@@ -121,13 +122,14 @@ Three failure modes recur across real downstream usage. They are also documented
 
 VHS `Wait+Screen /pattern/` only matches text currently visible on screen. When command output exceeds one screen, the target line scrolls out of view and VHS's wait will time out — even though the pattern clearly appeared. ttyd no longer has this constraint (it reads the full xterm.js scrollback buffer; see `ttyd.scrollback` in the quick reference for the default), but **VHS does**.
 
-Fix (VHS): wait for the prompt to return, not for an intermediate line. Append `|| true` so non-zero exits still return to the prompt.
+Fix (VHS): wait for the prompt to return, not for an intermediate line. Append `|| true` so non-zero exits still return to the prompt. Prefer `wait_for_prompt: true` over hand-rolled regexes — it uses the shared default prompt regex (`[\$#%▶❯>]\s*$`), works on both engines, and combines with `wait_for_text` so the "wait on summary AND wait on prompt return" idiom is one extra field rather than a custom regex.
 
 ```json
 {
   "action": "command",
   "text": "long_command_with_many_lines || true",
-  "wait_for_text": "demo \\$",
+  "wait_for_text": "summary line",
+  "wait_for_prompt": true,
   "timeout_ms": 30000
 }
 ```
