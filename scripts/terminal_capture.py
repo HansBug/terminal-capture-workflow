@@ -1029,15 +1029,37 @@ def _init_render_script(name: str, engine: str) -> str:
     The script is meant to be runnable from any cwd; it first chdirs to
     its own parent's parent (the project root, by convention), so the
     scenario path resolves correctly.
+
+    Hardened against unset ``$HOME`` (systemd units, cron, minimal CI
+    containers): if neither install path resolves, the script fails
+    loudly with an actionable message instead of crashing later inside
+    Python with a confusing "file not found" against an empty-prefix
+    path like ``/.claude/...``.
     """
     return (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         '\n'
         '# Resolve SKILL_ROOT to either install location; allow override via env.\n'
-        'SKILL_ROOT="${SKILL_ROOT:-$HOME/.claude/skills/terminal-capture-workflow}"\n'
+        '# An explicit SKILL_ROOT skips the $HOME lookups entirely, which is\n'
+        '# how cron / systemd / minimal CI containers (no HOME, no ~/.claude)\n'
+        '# should drive this script.\n'
+        'if [ -z "${SKILL_ROOT:-}" ]; then\n'
+        '  if [ -z "${HOME:-}" ]; then\n'
+        '    echo "Error: SKILL_ROOT is not set and HOME is empty." >&2\n'
+        '    echo "  Set SKILL_ROOT to the terminal-capture-workflow checkout, e.g." >&2\n'
+        '    echo "    SKILL_ROOT=/path/to/terminal-capture-workflow bash $0" >&2\n'
+        '    exit 1\n'
+        '  fi\n'
+        '  SKILL_ROOT="$HOME/.claude/skills/terminal-capture-workflow"\n'
+        '  if [ ! -d "$SKILL_ROOT" ]; then\n'
+        '    SKILL_ROOT="$HOME/.codex/skills/terminal-capture-workflow"\n'
+        '  fi\n'
+        'fi\n'
         'if [ ! -d "$SKILL_ROOT" ]; then\n'
-        '  SKILL_ROOT="$HOME/.codex/skills/terminal-capture-workflow"\n'
+        '  echo "Error: SKILL_ROOT does not point at a directory: $SKILL_ROOT" >&2\n'
+        '  echo "  Install the skill or override SKILL_ROOT explicitly." >&2\n'
+        '  exit 1\n'
         'fi\n'
         '\n'
         'cd "$(dirname "$0")/.."\n'

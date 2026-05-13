@@ -106,7 +106,17 @@ Check the environment first:
 python scripts/terminal_capture.py check
 ```
 
-Render a scenario:
+Bootstrap a brand-new scenario in your project (one-shot scaffold):
+
+```bash
+python scripts/terminal_capture.py init my-demo --engine vhs --with-setup
+# → scenarios/my-demo.json, scripts/render_my-demo.sh, scripts/setup_my-demo.sh
+bash scripts/render_my-demo.sh
+```
+
+See [`references/project-layout.md`](./references/project-layout.md) for the rationale, output-path conventions, and CI integration patterns.
+
+Render an existing scenario:
 
 ```bash
 python scripts/terminal_capture.py render all /path/to/scenario.json

@@ -139,3 +139,24 @@ def test_init_render_script_resolves_skill_root_via_env_or_known_paths(tmp_path)
     assert "SKILL_ROOT" in render_text
     assert ".claude/skills/terminal-capture-workflow" in render_text
     assert ".codex/skills/terminal-capture-workflow" in render_text
+
+
+def test_init_render_script_fails_loudly_when_home_and_skill_root_unset(tmp_path):
+    """systemd / cron / minimal CI containers run without ``$HOME``.
+    The generated render script must reject that state with an actionable
+    message instead of silently expanding to ``/.claude/...`` and
+    crashing later inside Python with a confusing "file not found"."""
+    init_scenario("foo", cwd=tmp_path, engine="vhs")
+    render_text = (tmp_path / "scripts" / "render_foo.sh").read_text()
+    assert "SKILL_ROOT is not set and HOME is empty" in render_text
+    assert "SKILL_ROOT does not point at a directory" in render_text
+
+
+@pytest.mark.parametrize("name", ["Foo", "MyDemo", "CamelCaseName", "A1", "X_y-Z"])
+def test_init_accepts_uppercase_and_mixed_case_names(tmp_path, name):
+    """The name regex allows ASCII uppercase as well as digits, ``-``,
+    and ``_`` mid-string. Pin a few CamelCase / mixed-case cases so a
+    future tightening can't silently break them."""
+    init_scenario(name, cwd=tmp_path, engine="vhs")
+    assert (tmp_path / "scenarios" / f"{name}.json").exists()
+    assert (tmp_path / "scripts" / f"render_{name}.sh").exists()

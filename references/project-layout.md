@@ -92,16 +92,34 @@ A common pattern, once the three-piece layout is in place:
 
 ### CI smoke
 
+The skill ships as a checkout-and-run repo, not a PyPI / npm package (no `pyproject.toml` or `setup.py` — see `AGENTS.md`). So CI installs the skill as a sibling checkout and points `SKILL_ROOT` at it:
+
 ```yaml
 # .github/workflows/render-smoke.yml
-- name: Smoke-test capture renders
-  run: |
-    pipx run --spec git+https://github.com/HansBug/terminal-capture-workflow ...
-    bash scripts/render_hero.sh
-    test -f .terminal-capture-output/vhs/hero/hero.mp4
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ttyd / vhs / ffmpeg
+        run: |
+          # Or whichever packaging is appropriate for your runner.
+          sudo apt-get update
+          sudo apt-get install -y ttyd ffmpeg less
+          # vhs — install per https://github.com/charmbracelet/vhs
+      - name: Clone terminal-capture-workflow skill alongside repo
+        run: |
+          git clone --depth 1 https://github.com/HansBug/terminal-capture-workflow \
+            "$RUNNER_TEMP/terminal-capture-workflow"
+          (cd "$RUNNER_TEMP/terminal-capture-workflow" && npm install && npx playwright install --with-deps chromium)
+          echo "SKILL_ROOT=$RUNNER_TEMP/terminal-capture-workflow" >> "$GITHUB_ENV"
+      - name: Render and assert
+        run: |
+          bash scripts/render_hero.sh
+          test -f .terminal-capture-output/vhs/hero/hero.mp4
 ```
 
-(The exact install incantation depends on what the skill ships as; see the upstream skill README. The pattern is: install / locate skill, run `bash scripts/render_*.sh`, assert artifacts exist.)
+The render script's `SKILL_ROOT` env override is precisely so this CI pattern works without having to set up `$HOME` or `~/.claude` inside the runner.
 
 ## When NOT to use this layout
 
@@ -119,5 +137,15 @@ python "$SKILL_ROOT/scripts/terminal_capture.py" init <name> \
 Behavior:
 
 - Refuses to overwrite any existing file with the target name (`FileExistsError`); no partial writes.
-- Names must match `^[A-Za-z0-9][A-Za-z0-9_-]*$`.
+- Names must match `^[A-Za-z0-9][A-Za-z0-9_-]*$` — **ASCII letters / digits / `-` / `_` only**, starting with a letter or digit. The scenario name ends up as a tape filename, an output directory name, and as a literal in the generated `render_<name>.sh` script, so CJK and other non-ASCII names are rejected on purpose to avoid shell / filesystem surprises on Windows-mounted volumes and stricter CI runners.
 - `<scenarios>` and `<scripts>` directories are auto-created if missing.
+
+## About the generated scenario defaults
+
+The template `init` writes is **opinionated for hero / tutorial captures**, not a bare engine-default snapshot. Notably:
+
+- `vhs.endHoldSeconds: 3` — engine default is 2; 3 sits in the middle of the 3–5s "hero / tutorial / PR review" band recommended in `SKILL.md` "Common Pitfalls". Lower it to `2` (or `null` for the engine default) if the asset is a tight loop.
+- `vhs.outputs: ["gif", "mp4"]` — covers the GitHub PR delivery case out of the box (WebM is rejected by GitHub's media upload endpoint, see `references/field-notes.md`).
+- `ttyd.viewport.deviceScaleFactor: 2` — Retina-quality PNGs at the cost of ~4× pixel count; drop to 1 for thumbnails.
+
+If you change these, do it in `scenarios/<name>.json` rather than hardcoding it across many scenarios — keep the template's role as "sensible starter values", not "the source of truth for defaults".
