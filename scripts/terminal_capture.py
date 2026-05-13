@@ -253,6 +253,58 @@ def escape_vhs_regex(pattern: str) -> str:
     return pattern.replace("/", "\\/")
 
 
+def resolve_wait_until_stable_ms(value: Any) -> int | None:
+    """Translate a ``wait_until_stable`` step field to a stable-window ms count.
+
+    Accepted shapes:
+
+    - ``None`` / unset → ``None`` (no extra stability wait)
+    - ``{"ms": <non-negative int>}`` → that integer count (additional
+      keys like ``"pattern"`` are accepted-but-ignored for forward
+      compatibility with any future config).
+
+    Anything else raises :class:`ValueError`. In particular a missing
+    ``ms`` key, a negative value, or passing a bare number rather than
+    a dict are all rejected loudly so a typo cannot quietly disable
+    the stability wait.
+
+    Engine handling (consumed by ``build_vhs_tape`` / the ttyd
+    renderer, not by this helper):
+
+    - **ttyd** polls the xterm.js buffer for ``ms`` milliseconds of
+      no-change after the existing ``wait_for_text`` fires.
+    - **VHS** has no observable buffer API; the renderer emits a
+      literal ``Sleep <ms>ms`` after the existing ``Wait+Screen``,
+      which is a degraded but still useful approximation (the sleep
+      timer starts only after the pattern appeared).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(
+            "wait_until_stable must be an object like {\"ms\": <int>} or unset, "
+            f"got {type(value).__name__}: {value!r}"
+        )
+    if "ms" not in value:
+        raise ValueError(
+            "wait_until_stable requires an `ms` key; got " f"{value!r}"
+        )
+    raw = value["ms"]
+    # Reject negatives loudly. parse_positive_int silently clamps,
+    # which would mask a typo like `{"ms": -800}`.
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"wait_until_stable.ms must be an integer, got {type(raw).__name__}: {raw!r}"
+        ) from error
+    if parsed < 0:
+        raise ValueError(
+            f"wait_until_stable.ms must be non-negative, got {parsed}"
+        )
+    return parsed
+
+
 def resolve_wait_prompt_pattern(value: Any) -> str | None:
     """Translate a ``wait_for_prompt`` field value to a regex string or ``None``.
 
@@ -846,6 +898,13 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
             timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             pattern = resolve_wait_pattern(step, "vhs")
             lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(pattern)}/')
+            stable_ms = resolve_wait_until_stable_ms(step.get("wait_until_stable"))
+            if stable_ms is not None:
+                # VHS-side degraded "stability" — the literal Sleep at
+                # least anchors after the pattern matched. See the
+                # docstring of resolve_wait_until_stable_ms for why ttyd
+                # gets real polling and VHS gets this.
+                lines.append(f"Sleep {format_duration(stable_ms)}")
         elif action == "wait_for_prompt":
             prompt_pattern = resolve_wait_prompt_pattern(step.get("prompt"))
             if not prompt_pattern:
@@ -877,6 +936,7 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
             lines.append("Enter")
             wait_pattern = resolve_wait_pattern(step, "vhs")
             prompt_pattern = resolve_wait_prompt_pattern(step.get("wait_for_prompt"))
+            stable_ms = resolve_wait_until_stable_ms(step.get("wait_until_stable"))
             timeout = step.get("timeout_ms")
             timeout_part = f'@{format_duration(timeout)}' if timeout else ""
             if wait_pattern:
@@ -888,7 +948,13 @@ def build_vhs_tape(scenario: dict[str, Any], out_dir: Path) -> str:
                 # the text wait gives the "summary visible AND command
                 # finished" guarantee that field-notes recommends.
                 lines.append(f'Wait+Screen{timeout_part} /{escape_vhs_regex(prompt_pattern)}/')
-            if not wait_pattern and not prompt_pattern:
+            if stable_ms is not None:
+                # Degraded stability wait — see resolve_wait_until_stable_ms
+                # docstring. Always lands after the explicit pattern /
+                # prompt waits so the timer starts when the output is
+                # most likely to be near-final.
+                lines.append(f"Sleep {format_duration(stable_ms)}")
+            if not wait_pattern and not prompt_pattern and stable_ms is None:
                 lines.append(f'Sleep {format_duration(step.get("result_delay_ms", 900))}')
             if step.get("result_shot"):
                 result_path = out_dir / f'{step["result_shot"]}.png'
